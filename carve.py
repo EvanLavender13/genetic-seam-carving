@@ -106,6 +106,7 @@ if __name__ == "__main__":
 
     # assign pivots
     # TODO: find way to encode "start"
+    # TODO: encode "start" as balanced ternary at beginning of individual
     for individual in population:
         start = toolbox.start(high=cols)
         individual.start = start
