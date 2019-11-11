@@ -3,7 +3,7 @@ import numpy as np
 
 from seam import construct_seam
 
-
+# TODO: calculate probs and pass as parameter
 def mutate(individual, size, sigma):
     # TODO: can this be calculated in advance ?
     probs = []
