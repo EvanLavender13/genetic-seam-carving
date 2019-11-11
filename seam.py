@@ -1,16 +1,15 @@
-import numpy as np
-
-
-def construct_seam(individual, pivot):
+def construct_seam(individual):
+    # get size of individual
     size = len(individual)
 
-    return np.array([(i, f(individual, i, pivot)) for i in range(size)])
+    # get start
+    val = individual.start
 
+    # create seam
+    seam = []
+    for i in range(size):
+        val = val + individual[i]
+        point = (i, val)
+        seam.append(point)
 
-def f(individual, index, pivot):
-    if index == pivot:
-        return individual[index]
-    elif index > pivot:
-        return individual[index] + f(individual, index - 1, pivot)
-    elif index < pivot:
-        return individual[index] + f(individual, index + 1, pivot)
+    return seam
