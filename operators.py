@@ -1,9 +1,8 @@
+import math
+
 import cv2
 import numpy as np
 
-from seam import construct_seam
-
-# TODO: calculate probs and pass as parameter
 def mutate(individual, size, sigma):
     # TODO: can this be calculated in advance ?
     probs = []
@@ -27,12 +26,13 @@ def gaussian(x, sigma):
     return np.exp(-np.power(x, 2) / (2 * np.power(sigma, 2)))
 
 
-def evaluate(individual, energy_map):
-    size = len(individual)
-    seam = construct_seam(individual)
-
+def evaluate(individual, header_size, energy_map):
     # get size of energy map
     e_row, e_col = energy_map.shape[:2]
+
+    seam = construct_seam(header_size, individual)
+
+    size = len(seam)
 
     energy = 1
     for s_row, s_col in seam:
@@ -44,8 +44,8 @@ def evaluate(individual, energy_map):
     energy /= size
 
     # TODO: figure this out
-    # print(energy * e_row, energy ** -math.e)
-    # return energy ** -math.e,
+    print(energy, energy ** -8)
+    # return energy ** -8,
     return 1 / energy,
     # return energy ** -3.0,
 
@@ -57,11 +57,28 @@ def get_energy_map(image):
     abs_grad_x = cv2.convertScaleAbs(grad_x)
     abs_grad_y = cv2.convertScaleAbs(grad_y)
 
-    energy_map = cv2.addWeighted(abs_grad_x, 1.0, abs_grad_y, 1.0, 0)
+    energy_map = cv2.addWeighted(abs_grad_x, 2.0, abs_grad_y, 2.0, 0)
 
     cv2.imwrite("energy_map.jpg", energy_map)
 
     return energy_map / 255.0
+
+
+def construct_seam(header_size, individual):
+    # get size of individual
+    size = len(individual[header_size:])
+
+    # get start
+    val = to_integer(individual[:header_size])
+
+    # create seam
+    seam = []
+    for i in range(size):
+        val = val + individual[i]
+        point = (i, val)
+        seam.append(point)
+
+    return seam
 
 
 def to_integer(ternary):

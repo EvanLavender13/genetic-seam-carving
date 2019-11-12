@@ -1,14 +1,16 @@
 import argparse
 import logging
+import multiprocessing
 
 import cv2
 import numpy as np
 from deap import base, tools, creator
 
-from operators import get_energy_map, evaluate, mutate
+from operators import get_energy_map, evaluate, mutate, to_balanced_ternary, construct_seam
+
+
 # reference
 # https://github.com/andrewdcampbell/seam-carving
-from seam import construct_seam
 
 
 def get_args():
@@ -35,7 +37,7 @@ def get_bool_mask(rows, cols, seam):
     bool_mask = np.ones(shape=(rows, cols), dtype=np.bool)
 
     for row, col in seam:
-        # print(rows, cols, row, col)
+        # print(rows, cols, row, col, len(seam))
         bool_mask[row, col] = False
 
     return bool_mask
@@ -64,25 +66,27 @@ if __name__ == "__main__":
     # get options
     show = args.show
 
-    # pool = multiprocessing.Pool()
-
-    # TODO:
+    # TODO: clean this up
     ind_size = target_shape[0]
+    header_size = len(to_balanced_ternary(ind_size))
+    ind_size += header_size
     # TODO: testing "growth"
 
     # TODO: make parameter
-    pop_size = 100
+    pop_size = 25
 
     creator.create("FitnessMax", base.Fitness, weights=(1.0,))
     creator.create("Individual", list, fitness=creator.FitnessMax)
 
+    pool = multiprocessing.Pool()
+
     toolbox = base.Toolbox()
     # TODO: figure this out
-    # toolbox.register("map", pool.map)
+    toolbox.register("map", pool.map)
     toolbox.register("value", np.random.randint, low=0, high=1)
     toolbox.register("start", np.random.randint, low=0)
     # TODO: clean this up
-    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.value, n=2)
+    toolbox.register("individual", tools.initRepeat, creator.Individual, toolbox.value, n=header_size + 1)
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 
     toolbox.register("select", tools.selRoulette, k=pop_size)
@@ -96,7 +100,7 @@ if __name__ == "__main__":
     gray = cv2.cvtColor(target_image, cv2.COLOR_BGR2GRAY)
     energy_map = get_energy_map(gray)
 
-    toolbox.register("evaluate", evaluate, energy_map=energy_map)
+    toolbox.register("evaluate", evaluate, header_size=header_size, energy_map=energy_map)
 
     # get shape of energy map
     rows, cols = energy_map.shape
@@ -104,21 +108,10 @@ if __name__ == "__main__":
     # create initial population
     population = toolbox.population(pop_size)
 
-    # assign pivots
-    # TODO: find way to encode "start"
-    # TODO: encode "start" as balanced ternary at beginning of individual
-    for individual in population:
-        start = toolbox.start(high=cols)
-        individual.start = start
-        # print("individual=", individual)
-
     # evaluate population
     fitness = toolbox.map(toolbox.evaluate, population)
     for ind, fit in zip(population, fitness):
         ind.fitness.values = fit
-
-    # TODO: make this an argument
-    num_generations = 50
 
     # TODO: figure this out
     seams_carved = 0
@@ -130,7 +123,7 @@ if __name__ == "__main__":
         # TODO: this is weird
         # TODO: make the gaussian parameters actual parameters
         size = len(offspring[0])
-        toolbox.register("mutate", mutate, size=int(size / 2), sigma=int(size / 5))
+        toolbox.register("mutate", mutate, size=5, sigma=21.0)
 
         # combine selection
         for child1, child2 in zip(offspring[::2], offspring[1::2]):
@@ -142,17 +135,13 @@ if __name__ == "__main__":
         for mutant in offspring:
             # TODO: clean this up
             size = len(mutant)
-            if size < ind_size and np.random.random() < 0.1:
-                mutant.extend([toolbox.value() for _ in range(min(int(ind_size / 10), ind_size - size))])
-            else:
-                mutant.append(0)
+            if size < ind_size and np.random.random() < 0.5:
+                if ind_size - size > 5:
+                    mutant.extend([0] * 5)
+                else:
+                    mutant.append(0)
 
             toolbox.mutate(mutant)
-
-            # TODO: this is weird
-            if np.random.random() < 0.25:
-                mutant.start = toolbox.start(high=cols)
-
             del mutant.fitness.values
 
         invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
@@ -167,7 +156,7 @@ if __name__ == "__main__":
         # u_max = 0.0
         elite = population[max_index]
 
-        seam = construct_seam(elite)
+        seam = construct_seam(header_size, elite)
 
         rows, cols = target_image.shape[:2]
         bool_mask = get_bool_mask(rows, cols, seam)
@@ -183,7 +172,7 @@ if __name__ == "__main__":
             # TODO: can this be somewhere else ?
             gray = cv2.cvtColor(target_image, cv2.COLOR_BGR2GRAY)
             energy_map = get_energy_map(gray)
-            toolbox.register("evaluate", evaluate, energy_map=energy_map)
+            toolbox.register("evaluate", evaluate, header_size=header_size, energy_map=energy_map)
 # break
 
 cv2.imwrite("target.jpg", target_image)
