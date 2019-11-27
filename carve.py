@@ -6,7 +6,6 @@ from copy import deepcopy
 
 import cv2
 import numpy as np
-from deap import creator, base
 from scipy import ndimage as ndi
 
 
@@ -49,6 +48,16 @@ def visualize(image, bool_mask=None):
     return display
 
 
+def remove_seam(image, bool_mask):
+    rows, cols, _ = image.shape
+
+    bool_mask = np.stack([bool_mask] * 3, axis=2)
+
+    image = image[bool_mask].reshape((rows, cols - 1, 3))
+
+    return image
+
+
 # https://github.com/andrewdcampbell/seam-carving
 def backward_energy(image):
     """
@@ -59,8 +68,8 @@ def backward_energy(image):
 
     grad_mag = np.sqrt(np.sum(xgrad ** 2, axis=2) + np.sum(ygrad ** 2, axis=2))
 
-    vis = visualize(grad_mag)
-    cv2.imwrite("backward_energy_demo.jpg", vis)
+    # vis = visualize(grad_mag)
+    # cv2.imwrite("backward_energy_demo.jpg", vis)
 
     return grad_mag / 255.0
 
@@ -74,14 +83,14 @@ def forward_energy(image):
     https://github.com/axu2/improved-seam-carving.
     """
     h, w = image.shape[:2]
-    image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float64)
+    g_image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_BGR2GRAY).astype(np.float64)
 
     energy = np.zeros((h, w))
     m = np.zeros((h, w))
 
-    U = np.roll(image, 1, axis=0)
-    L = np.roll(image, 1, axis=1)
-    R = np.roll(image, -1, axis=1)
+    U = np.roll(g_image, 1, axis=0)
+    L = np.roll(g_image, 1, axis=1)
+    R = np.roll(g_image, -1, axis=1)
 
     cU = np.abs(R - L)
     cL = np.abs(U - L) + cU
@@ -100,8 +109,8 @@ def forward_energy(image):
         m[i] = np.choose(argmins, mULR)
         energy[i] = np.choose(argmins, cULR)
 
-    vis = visualize(energy)
-    cv2.imwrite("forward_energy_demo.jpg", vis)
+    # vis = visualize(energy)
+    # cv2.imwrite("forward_energy_demo.jpg", vis)
 
     return energy / 255.0
 
@@ -198,6 +207,8 @@ def mutate(individual, kernel):
     point = np.random.randint(low=0, high=size)
     window = [point + i for i in range(1 - kernel_size, kernel_size)]
 
+    # print("mutate", kernel)
+
     for i in range(len(window)):
         index = window[i]
         if 0 <= index < size and index != pivot:
@@ -224,10 +235,6 @@ if __name__ == "__main__":
     target_image = input_image.astype(np.float64)
     target_shape = tuple(args.target_shape)
 
-    # set up DEAP fitness
-    creator.create("FitnessMax", base.Fitness, weights=(1.0,))
-    creator.create("Individual", list, fitness=creator.FitnessMax)
-
     # create pool for multiprocessing
     pool = multiprocessing.Pool()
 
@@ -236,16 +243,20 @@ if __name__ == "__main__":
 
     while target_image.shape[:2] > target_shape:
         rows, cols = target_image.shape[:2]
+
+        diff = cols - target_shape[1]
+        print("carving ... diff %s" % diff)
+
         population = create_population(10, rows, cols)
 
         # TODO: make energy function an argument
-        energy_map = backward_energy(target_image)
-        # energy_map = forward_energy(target_image)
+        #energy_map = backward_energy(target_image)
+        energy_map = forward_energy(target_image)
 
         # TODO: make number of generations an argument
-        num_generations = 100
+        num_generations = 20
         for generation in range(1, num_generations + 1):
-            print("generation", generation)
+            #print("generation", generation)
 
             fitness = pool.map(functools.partial(evaluate, energy_map), population)
 
@@ -253,7 +264,7 @@ if __name__ == "__main__":
             selection_pool = pool.map(deepcopy, selection_pool)
 
             # TODO: figure this out
-            kernel = gaussian(5, 1.0)
+            kernel = gaussian(21, 3.0)
             for individual1, individual2 in zip(selection_pool[::2], selection_pool[1::2]):
                 cross(individual1, individual2)
                 mutate(individual1, kernel)
@@ -262,16 +273,21 @@ if __name__ == "__main__":
             population[:] = selection_pool
             # break
 
-            fitness = pool.map(functools.partial(evaluate, energy_map), population)
-            for individual, fitness in zip(population, fitness):
-                if fitness > 0.0:
-                    seam = create_seam(individual)
+        fitness = pool.map(functools.partial(evaluate, energy_map), population)
 
-                    # print(fitness, individual, seam)
-                    mask = get_bool_mask(rows, cols, seam)
+        elite = np.argmax(fitness)
 
-                    visualize(target_image, mask)
+        seam = create_seam(population[elite])
 
-            # break
+        # print(fitness, individual, seam)
+        mask = get_bool_mask(rows, cols, seam)
 
-        break
+        if args.show:
+            visualize(target_image, mask)
+
+        target_image = remove_seam(target_image, mask)
+        # break
+
+        # break
+
+    cv2.imwrite("target.jpg", target_image)
